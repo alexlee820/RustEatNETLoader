@@ -1,0 +1,17 @@
+[package]
+name = "RustEatNETLoader"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+winapi = { version = "*", features = ["errhandlingapi", "libloaderapi", "memoryapi", "psapi", "processthreadsapi", "windef", "winnt", "winuser"] }
+windows = { version = "0.54", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+clroxide = { version = "1.0.6", default-features = true }
+rc4 = "0.1.0"
+base64 = "0.13.0"
+sysinfo = "0.30.5"
+clap = { version = "4.5.0", features = ["derive"] }
+kernel32-sys = "0.2.2"
+widestring = "0.4.3"
+ntapi = {version = "0.4.1"}
+rust_syscalls = {git = "https://github.com/janoglezcampos/rust_syscalls", features = ["_INDIRECT_"]}
