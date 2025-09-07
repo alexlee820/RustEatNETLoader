@@ -9,11 +9,13 @@ So now you might ask how we can solve this. Actually, the solution is quite simp
 ![](images/Patched_Messagebox.png)
 </br>
 This repo includes:
-- EAT hook Amsi.dll!AmsiScanBuffer and advapi32!Event
-- Patching MessageboxA via indirect syscall to create trampoline
+</br>
+* EAT hook Amsi.dll!AmsiScanBuffer and advapi32!Event
+* Patching MessageboxA via indirect syscall to create trampoline
 </br>
 Pending Improve:
-- VirtualProtect in EAT hook (When I am using the NtProtectVirtualMemory , the CLR donot know why can’t run without any error. If anyone know why ,can make a pull request.)
+</br>
+* VirtualProtect in EAT hook (When I am using the NtProtectVirtualMemory , the CLR donot know why can’t run without any error. If anyone know why ,can make a pull request.)
 </br>
 # ETW bypass
 ![](images/ETW.png)
