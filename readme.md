@@ -10,11 +10,13 @@ So now you might ask how we can solve this. Actually, the solution is quite simp
 This repo includes:
 
 * EAT hook Amsi.dll!AmsiScanBuffer and advapi32!Event
+* Patching CLR.dll AmsiScanbuffer string
 * Patching MessageboxA via indirect syscall to create trampoline
 
-Pending Improve:
-
+# Pending Improve/Research 
 * VirtualProtect in EAT hook (When I am using the NtProtectVirtualMemory , the CLR donot know why can't run without any error. If anyone know why ,can make a pull request.)
+* EAT Hook Fail to Bypass AMSI . When I have EAT hooked the Amsiscanbuffer to MessageboxA, but don't know why the messageboxA return 1 ,it still enter to the code which identify the contents as malicious  
+![](images/AmsiScan.png)
 
 # ETW bypass
 ![](images/ETW.png)
